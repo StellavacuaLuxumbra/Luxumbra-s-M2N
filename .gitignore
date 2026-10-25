@@ -1,0 +1,13 @@
+build/
+build-*/
+out/
+_deps/
+.cache/
+.vs/
+.vscode/
+.idea/
+*.user
+*.exe
+*.dll
+*.lib
+*.a
