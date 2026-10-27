@@ -21,6 +21,11 @@ class Reader {
     return data_[pos_++];
   }
 
+  uint16_t u16() {
+    uint16_t v = u8();
+    return static_cast<uint16_t>((v << 8) | u8());
+  }
+
   void unread() {
     // running status 时把误读的数据字节退回
     if (pos_ > 0) --pos_;

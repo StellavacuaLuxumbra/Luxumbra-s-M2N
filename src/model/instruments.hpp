@@ -3,6 +3,7 @@
 // 以及 GM (General MIDI) 音色 -> 乐器的映射
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace m2n::model {
@@ -46,5 +47,7 @@ bool instrumentPitched(Instrument ins);
 Instrument mapGmProgram(uint8_t program);
 // GM 打击组 (channel 10) 音符 -> 乐器
 Instrument mapDrumNote(uint8_t note);
+// 按方块状态 id 反查乐器
+std::optional<Instrument> instrumentFromId(std::string_view id);
 
 }  // namespace m2n::model

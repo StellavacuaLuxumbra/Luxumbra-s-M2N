@@ -21,6 +21,9 @@ endif()
 # ---------------------------------------------------------------------------
 include(FetchContent)
 
+# miniz 等旧项目声明 cmake_minimum_required < 3.5, CMake 4 需要此兼容开关
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 # miniz: gzip (结构 NBT) + zip 打包 (数据包/资源包)
 FetchContent_Declare(miniz
   GIT_REPOSITORY https://github.com/richgel999/miniz.git
@@ -31,7 +34,7 @@ FetchContent_MakeAvailable(miniz)
 # stb 仓库根目录没有 CMakeLists.txt, MakeAvailable 只下载
 FetchContent_Declare(stb
   GIT_REPOSITORY https://github.com/nothings/stb.git
-  GIT_TAG f7f20f39fe4f206c7f4e3ff5ba9d17674341f3b2)
+  GIT_TAG 003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5)  # master 2025-04
 FetchContent_MakeAvailable(stb)
 
 # doctest: 单元测试框架
@@ -75,8 +78,8 @@ if(M2N_ENABLE_AUDIO)
     ${vorbis_SOURCE_DIR}/lib/lsp.c
     ${vorbis_SOURCE_DIR}/lib/mapping0.c
     ${vorbis_SOURCE_DIR}/lib/mdct.c
-    ${vorbis_SOURCE_DIR}/lib/psycho_1.c
-    ${vorbis_SOURCE_DIR}/lib/psycho_2.c
+    ${vorbis_SOURCE_DIR}/lib/misc.c
+    ${vorbis_SOURCE_DIR}/lib/psy.c
     ${vorbis_SOURCE_DIR}/lib/registry.c
     ${vorbis_SOURCE_DIR}/lib/res0.c
     ${vorbis_SOURCE_DIR}/lib/sharedbook.c
@@ -94,10 +97,9 @@ if(M2N_ENABLE_AUDIO)
 endif()
 
 # ---------------------------------------------------------------------------
-# 主程序
+# 核心库 (main.cpp 之外的全部源码, 主程序与测试共用)
 # ---------------------------------------------------------------------------
-add_executable(m2n
-  src/main.cpp
+add_library(m2n_core STATIC
   src/app.cpp
   src/cli/cli.cpp
   src/util/fs.cpp
@@ -112,19 +114,27 @@ add_executable(m2n
   src/structure/export_nbt.cpp
   src/datapack/export.cpp)
 
-target_include_directories(m2n PRIVATE src ${miniz_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(m2n PRIVATE miniz)
+target_include_directories(m2n_core PUBLIC src ${miniz_SOURCE_DIR} ${stb_SOURCE_DIR})
+target_link_libraries(m2n_core PUBLIC miniz)
 
 if(M2N_ENABLE_AUDIO)
-  target_sources(m2n PRIVATE
+  target_sources(m2n_core PRIVATE
     src/audio/synth.cpp
     src/audio/ogg_encoder.cpp
     src/audio/vanilla_assets.cpp
+    src/audio/stb_vorbis_impl.c
     src/resourcepack/disc.cpp)
-  target_compile_definitions(m2n PRIVATE M2N_HAS_AUDIO=1)
-  target_include_directories(m2n PRIVATE ${ogg_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/lib)
-  target_link_libraries(m2n PRIVATE m2n_vorbis)
+  target_compile_definitions(m2n_core PUBLIC M2N_HAS_AUDIO=1)
+  target_include_directories(m2n_core PUBLIC
+    ${ogg_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/lib)
+  target_link_libraries(m2n_core PUBLIC m2n_vorbis)
 endif()
+
+# ---------------------------------------------------------------------------
+# 主程序
+# ---------------------------------------------------------------------------
+add_executable(m2n src/main.cpp)
+target_link_libraries(m2n PRIVATE m2n_core)
 
 # ---------------------------------------------------------------------------
 # 测试
@@ -140,14 +150,10 @@ add_executable(m2n_tests
   tests/datapack_tests.cpp
   tests/e2e_tests.cpp)
 
-target_include_directories(m2n_tests PRIVATE src ${miniz_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(m2n_tests PRIVATE miniz doctest::doctest)
+target_link_libraries(m2n_tests PRIVATE m2n_core doctest::doctest)
 
 if(M2N_ENABLE_AUDIO)
   target_sources(m2n_tests PRIVATE tests/audio_tests.cpp)
-  target_compile_definitions(m2n_tests PRIVATE M2N_HAS_AUDIO=1)
-  target_include_directories(m2n_tests PRIVATE ${ogg_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/include ${vorbis_SOURCE_DIR}/lib)
-  target_link_libraries(m2n_tests PRIVATE m2n_vorbis)
 endif()
 
 add_test(NAME m2n_tests COMMAND m2n_tests)
