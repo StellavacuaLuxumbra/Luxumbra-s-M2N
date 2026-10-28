@@ -66,18 +66,58 @@ TEST_CASE("布局不变量: 每条泳道中继器延迟和 = 前缀 + 步数*gri
   auto layout = buildMachine(song, {});
 
   REQUIRE(layout.laneBusZ.size() == song.lanes.size());
-  // 按泳道统计中继器总延迟
+  REQUIRE(layout.passes == 1);
+  // 按泳道统计中继器总延迟 (扫描该泳道的全部带行)
   // 世界坐标: 结构坐标 = 世界坐标 - min。xMin=-2, yMin=-1 (地板), zMin=0 (zFirst-1=0)
   // → x 偏移 +2, y 偏移 +1, z 不偏移; 总线层世界 y=1 → 结构 y=2
   for (size_t i = 0; i < song.lanes.size(); ++i) {
-    int busZ = layout.laneBusZ[i];
     int totalDelay = 0;
-    for (const auto& b : layout.tmpl.blocks) {
-      if (b.name == "minecraft:repeater" && b.z == busZ && b.y == 2) {
-        totalDelay += std::stoi(b.properties.at("delay"));
-      }
+    for (int z : layout.laneRowsZ[i])
+      for (const auto& b : layout.tmpl.blocks)
+        if (b.name == "minecraft:repeater" && b.z == z && b.y == 2)
+          totalDelay += std::stoi(b.properties.at("delay"));
+    int expected = 0;
+    for (int q = 0; q < layout.passes; ++q) {
+      int stepSpan = layout.bandDelayTicks > 0 ? layout.bandDelayTicks / song.gridTicks
+                                               : song.totalSteps;
+      int s0 = q * stepSpan, s1 = std::min(song.totalSteps, s0 + stepSpan);
+      expected += layout.lanePrefixDelay[i][q] + (s1 - s0) * song.gridTicks;
     }
-    int expected = layout.lanePrefixDelay[i] + song.totalSteps * song.gridTicks;
+    CHECK(totalDelay == expected);
+  }
+}
+
+TEST_CASE("蛇形折叠: 跨带时序不失步、无布局冲突、音符数完整") {
+  auto song = makeSong(3);
+  const int foldWidth = 4;
+  auto layout = buildMachine(song, {.foldWidth = foldWidth});
+
+  // 多带 + 非零跨带延迟
+  REQUIRE(layout.passes > 1);
+  REQUIRE(layout.bandDelayTicks == foldWidth * song.gridTicks);
+  REQUIRE(layout.noteBlockCount == song.totalNotes);
+  REQUIRE(layout.sizeY == 3);  // 地板 + 支撑层 + 总线层
+
+  // 各泳道各带的总线行互不相交 (带间 z 不相交 => 零碰撞)
+  std::set<int> allRows;
+  for (const auto& rows : layout.laneRowsZ)
+    for (int z : rows) {
+      CHECK(allRows.insert(z).second);
+    }
+
+  // 每条泳道全程中继器延迟和 = 各带(前缀 + 步延迟)之和, 时序对齐
+  for (size_t i = 0; i < song.lanes.size(); ++i) {
+    int totalDelay = 0;
+    for (int z : layout.laneRowsZ[i])
+      for (const auto& b : layout.tmpl.blocks)
+        if (b.name == "minecraft:repeater" && b.z == z && b.y == 2)
+          totalDelay += std::stoi(b.properties.at("delay"));
+    int expected = 0;
+    int stepSpan = foldWidth;
+    for (int q = 0; q < layout.passes; ++q) {
+      int s0 = q * stepSpan, s1 = std::min(song.totalSteps, s0 + stepSpan);
+      expected += layout.lanePrefixDelay[i][q] + (s1 - s0) * song.gridTicks;
+    }
     CHECK(totalDelay == expected);
   }
 }

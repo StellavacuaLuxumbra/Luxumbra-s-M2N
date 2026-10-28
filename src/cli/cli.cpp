@@ -38,6 +38,7 @@ build 选项:
       --vanilla-samples  用本地 .minecraft 原版音色渲染唱片音频
       --vanilla-dir <目录> .minecraft 目录 (默认自动探测)
       --no-floor         结构不生成装饰地板
+      --fold-width <n>   蛇形折叠: 每条"带"的步数 (0=不折叠, 越小机器越短)
       --zip              同时打包 zip
 )";
 }

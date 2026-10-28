@@ -85,7 +85,7 @@ int build(const std::string& midiPath, const std::vector<std::string>& args) {
   // ---- 参数解析 ----
   std::string outDirArg, mcVersionArg, formatsArg = "nbt,datapack", discArg = "pigstep",
                                                     vanillaDirArg;
-  int grid = 2, maxLanes = 16;
+  int grid = 2, maxLanes = 16, foldWidth = 0;
   bool loop = false, particles = false, vanillaSamples = false, noFloor = false, zip = false;
 
   auto needValue = [&](size_t& i, const char* name) -> std::string {
@@ -107,6 +107,7 @@ int build(const std::string& midiPath, const std::vector<std::string>& args) {
       else if (a == "--vanilla-dir") vanillaDirArg = needValue(i, a.c_str());
       else if (a == "--no-floor") noFloor = true;
       else if (a == "--zip") zip = true;
+      else if (a == "--fold-width") foldWidth = std::stoi(needValue(i, a.c_str()));
       else throw std::runtime_error("未知选项: " + a);
     }
   } catch (const std::exception& e) {
@@ -186,6 +187,7 @@ int build(const std::string& midiPath, const std::vector<std::string>& args) {
       try {
         structure::LayoutOptions lopts;
         lopts.decorativeFloor = !noFloor;
+        lopts.foldWidth = foldWidth;
         fs::path file = outDir / (song.id + "_machine.nbt");
         auto r = structure::exportStructureNbt(song, file, mc->dataVersion, lopts);
         std::cout << "[nbt] 红石结构: " << r.file.string() << "\n";

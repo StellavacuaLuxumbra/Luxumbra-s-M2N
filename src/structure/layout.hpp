@@ -20,6 +20,7 @@ namespace m2n::structure {
 struct LayoutOptions {
   int laneGap = 1;            // 泳道间空隙 (格)
   bool decorativeFloor = true; // 生成整层装饰地板
+  int foldWidth = 0;           // 蛇形折叠: 每条"带"的步数 (0 = 不折叠, 单带直线)
 };
 
 struct MachineLayout {
@@ -27,9 +28,12 @@ struct MachineLayout {
   int sizeX = 0, sizeY = 0, sizeZ = 0;
   int noteBlockCount = 0;
   int leverZ = 0;                       // 拉杆所在 z (世界坐标, 用于文档)
-  std::vector<int> laneBusZ;            // 每条泳道总线的 z (世界坐标)
-  std::vector<int> lanePrefixDelay;     // 每条泳道同步补偿延迟 (tick)
-  int trunkExtraDelay = 0;              // 汇流排带来的最大延迟 (tick)
+  std::vector<int> laneBusZ;            // 第 0 带每条泳道总线的 z (世界坐标)
+  std::vector<std::vector<int>> laneRowsZ; // [lane][pass] 每条泳道每条带的行 z
+  std::vector<std::vector<int>> lanePrefixDelay; // [lane][pass] 各带头部同步补偿延迟 (tick)
+  int trunkExtraDelay = 0;              // 汇流排带来的基准延迟 (tick)
+  int bandDelayTicks = 0;               // 每条带的跨带延迟 (tick, foldWidth>0 时有效)
+  int passes = 1;                       // 带的数量 (foldWidth>0 时 >1)
 };
 
 MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options = {});

@@ -111,27 +111,6 @@ void placeRepeater(MachineBuilder& b, int x, int y, int z, const char* facing, i
            {"powered", "false"}});
 }
 
-// 放 count 个红石粉单元, 从 (x,z) 沿 (dx,dz) 推进。
-// 红石粉信号 15 起每格 -1: 连续 14 个红石粉后必须经中继器复位 (1 tick)。
-// *since 跨调用累计同一条信号路径上的连续红石粉数; 返回插入的中继器数。
-int layWire(MachineBuilder& b, int x, int y, int z, int dx, int dz, int count,
-            const char* repFacing, int* since) {
-  int repeaters = 0;
-  for (int k = 0; k < count; ++k) {
-    if (*since >= 14) {
-      placeRepeater(b, x, y, z, repFacing, 1);
-      ++repeaters;
-      *since = 0;
-    } else {
-      b.place(x, y, z, "minecraft:redstone_wire");
-      ++*since;
-    }
-    x += dx;
-    z += dz;
-  }
-  return repeaters;
-}
-
 }  // namespace
 
 MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options) {
@@ -187,16 +166,14 @@ MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options
   for (const auto& rows : out.laneRowsZ)
     for (int z : rows) laneRowSet.insert(z);
 
-  std::vector<int> trunkRepeaters;
+  // 带间空隙 -> 延迟链: 从本带末行之后到下带首行之前放 ⌈T/4⌉ 个中继器,
+  // 延迟和恰好 = bandTicks
+  std::map<int, int> chainAt;  // z -> delay
   {
-    // 收集所有带间空隙区间 (本带最后一行 + 1 .. 下带第一行 - 1)
     std::vector<std::pair<int, int>> gaps;
     for (int q = 0; q + 1 < nPasses; ++q) {
-      int from = rowZ(nLanes - 1, q) + 1;
-      int to = rowZ(0, q + 1) - 1;
-      gaps.emplace_back(from, to);
+      gaps.emplace_back(rowZ(nLanes - 1, q) + 1, rowZ(0, q + 1) - 1);
     }
-    std::map<int, int> chainAt;  // z -> delay (带间链)
     for (auto [from, to] : gaps) {
       int rows = to - from + 1;
       int t = bandTicks;
@@ -208,27 +185,33 @@ MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options
         chainAt[from + k] = d;
       }
     }
-    int sinceRep = 0;
-    for (int z = zFirst; z <= zTrunkLast; ++z) {
-      if (laneRowSet.count(z)) {
-        ++sinceRep;
-        continue;  // 泳道行放红石粉 (下面统一放)
-      }
-      auto it = chainAt.find(z);
-      if (it != chainAt.end()) {
-        placeRepeater(builder, -1, 1, z, "south", it->second);
-        trunkRepeaters.push_back(z);
-        sinceRep = 0;
-        continue;
-      }
-      if (sinceRep >= 14 && z < zTrunkLast) {
-        placeRepeater(builder, -1, 1, z, "south", 1);
-        trunkRepeaters.push_back(z);
-        sinceRep = 0;
-        continue;
-      }
+  }
+
+  // 汇流排放置 (x=-1, y=1; 支撑行 y=0), 一遍完成, 避免重复占用
+  std::vector<int> trunkRepeaters;
+  int sinceRep = 0;
+  for (int z = zFirst; z <= zTrunkLast; ++z) {
+    builder.place(-1, 0, z, "minecraft:smooth_stone");
+    if (laneRowSet.count(z)) {
+      builder.place(-1, 1, z, "minecraft:redstone_wire");
       ++sinceRep;
+      continue;
     }
+    auto it = chainAt.find(z);
+    if (it != chainAt.end()) {
+      placeRepeater(builder, -1, 1, z, "south", it->second);
+      trunkRepeaters.push_back(z);
+      sinceRep = 0;
+      continue;
+    }
+    if (sinceRep >= 14 && z < zTrunkLast) {
+      placeRepeater(builder, -1, 1, z, "south", 1);
+      trunkRepeaters.push_back(z);
+      sinceRep = 0;
+      continue;
+    }
+    builder.place(-1, 1, z, "minecraft:redstone_wire");
+    ++sinceRep;
   }
 
   auto trunkDelayAt = [&](int z) {
@@ -290,7 +273,6 @@ MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options
           maxX = std::max(maxX, static_cast<int>(x - 1));
         }
         // 步间中继器: 延迟和 = gridTicks, 放在红石粉之后 (单元方向 = 向东)
-        int sinceWire = 0;
         for (const int d : splitDelay(grid)) {
           placeRepeater(builder, x++, 1, bz, "east", d);
         }
@@ -303,24 +285,53 @@ MachineLayout buildMachine(const model::Song& song, const LayoutOptions& options
     }
   }
 
-  // ---- 汇流排方块 ----
-  std::set<int> repZ(trunkRepeaters.begin(), trunkRepeaters.end());
-  for (int z = zFirst; z <= zTrunkLast; ++z) {
-    if (repZ.count(z))
-      placeRepeater(builder, -1, 1, z, "south", 1);
-    else
-      builder.place(-1, 1, z, "minecraft:redstone_wire");
-    builder.place(-1, 0, z, "minecraft:smooth_stone");
-    maxX = std::max(maxX, -1);
-  }
+  // 汇流排方块与支撑行已在上方一次性放置完毕
 
   // ---- 拉杆 ----
-  builder.place(-2, 0, leverZ(), out, "minecraft:smooth_stone");
-  builder.place(-2, 1, leverZ(), out, "minecraft:lever",
+  builder.place(-2, 0, out.leverZ, "minecraft:smooth_stone");
+  builder.place(-2, 1, out.leverZ, "minecraft:lever",
                 {{"face", "floor"}, {"facing", "north"}, {"powered", "false"}});
   maxX = std::max(maxX, -2);
 
   // ---- 地板: 所有 y=0 方块下方放底座; 音符盒位置再换成乐器对应材质 ----
+  if (options.decorativeFloor) {
+    int zMin = zFirst - 1;
+    int zMax = zTrunkLast + 1;
+    for (int x = -2; x <= maxX; ++x)
+      for (int z = zMin; z <= zMax; ++z)
+        builder.placeNoCheck(x, -1, z, "minecraft:polished_deepslate");
+  } else {
+    // 仅在各泳道支撑行与音符盒下方放底座 (逐带重走 x 终点)
+    for (size_t i = 0; i < nLanes; ++i) {
+      for (int pass = 0; pass < nPasses; ++pass) {
+        int bz = rowZ(i, pass);
+        int x = 0;
+        int sync = baseDelay + pass * bandTicks - trunkDelayAt(bz);
+        x += static_cast<int>(splitDelay(sync).size());
+        const int s0 = pass * foldWidth;
+        const int s1 =
+            std::min(totalSteps, s0 + (foldWidth > 0 ? foldWidth : totalSteps));
+        for (int s = s0; s < s1; ++s) {
+          auto it = stepNotes[i].find(s);
+          size_t noteCount = it == stepNotes[i].end() ? 0 : it->second.size();
+          if (noteCount > 0) {
+            size_t k = (noteCount + 1) / 2;
+            x += static_cast<int>(k);
+          }
+          x += static_cast<int>(splitDelay(grid).size());
+        }
+        int xEnd = x - 1;
+        for (int sx = 0; sx <= xEnd; ++sx) {
+          builder.placeNoCheck(sx, -1, bz, "minecraft:polished_deepslate");
+          builder.placeNoCheck(sx, -1, bz - 1, "minecraft:polished_deepslate");
+          builder.placeNoCheck(sx, -1, bz + 1, "minecraft:polished_deepslate");
+        }
+      }
+    }
+    builder.placeNoCheck(-1, -1, out.leverZ, "minecraft:polished_deepslate");
+    builder.placeNoCheck(-2, -1, out.leverZ, "minecraft:polished_deepslate");
+  }
+  // 音符盒下方的乐器对应材质 (覆盖基座, 双保险)
   for (const auto& f : nbFloors) builder.placeNoCheck(f.x, -1, f.z, f.block);
 
   auto tmpl = builder.finish(3465);
